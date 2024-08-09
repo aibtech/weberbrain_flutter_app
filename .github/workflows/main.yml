@@ -1,0 +1,50 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ dev, staging, main ]
+  pull_request:
+    branches: [ dev, staging, main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Debug - Check Secrets
+      env:
+        SECRET_CHECK: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      run: |
+        if [ -n "$SECRET_CHECK" ]; then echo "AWS_ACCESS_KEY_ID is set"; else echo "AWS_ACCESS_KEY_ID is NOT set"; fi
+        if [ -n "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then echo "AWS_SECRET_ACCESS_KEY is set"; else echo "AWS_SECRET_ACCESS_KEY is NOT set"; fi
+    
+    - name: Configure AWS Credentials
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      run: |
+        aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+        aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+        aws configure set default.region ap-southeast-1
+    
+    - name: Debug - Check AWS CLI Configuration
+      run: |
+        aws sts get-caller-identity
+    
+    - uses: actions/setup-node@v3
+      with:
+        node-version: 20
+    - run: npm install -g @aws-amplify/cli
+    
+    - name: Deploy to Amplify
+      run: |
+        BRANCH_NAME=${GITHUB_REF##*/}
+        echo "Current branch: $BRANCH_NAME"
+        amplify env checkout $BRANCH_NAME
+        amplify push --yes
+        AMPLIFY_APP_ID=$(aws amplify list-apps --query "apps[?name=='weberbrain_flutter_app'].appId" --output text)
+        echo "Amplify App ID: $AMPLIFY_APP_ID"
+        aws amplify start-job --app-id $AMPLIFY_APP_ID --branch-name $BRANCH_NAME --job-type RELEASE
